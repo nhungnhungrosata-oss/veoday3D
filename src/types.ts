@@ -1,37 +1,57 @@
-export type VoiceType = "Bắc" | "Trung" | "Nam";
-export type VideoModelType = "Veo 3" | "Gork";
-export type StyleType = "energy" | "professional" | "gentle" | "natural";
+export type VoiceType = 'Bắc' | 'Trung' | 'Nam';
+export type VideoModelType = 'Veo 3' | 'Gork';
+export type SceneCount = 3 | 4 | 5;
+export type ContentStyle =
+  | 'Vui vẻ'
+  | 'Giáo dục'
+  | 'Truyền cảm hứng'
+  | 'Hài hước'
+  | 'Gần gũi'
+  | 'Kể chuyện'
+  | 'Chuyên nghiệp'
+  | 'Dễ hiểu';
+export type AudienceType =
+  | 'Trẻ em'
+  | 'Người trưởng thành'
+  | 'Gia đình'
+  | 'Người quan tâm sức khỏe'
+  | 'Tùy chỉnh';
 
 export interface AppState {
-  images: string[];
-  selectedImageIndex: number | null;
-  content: string;
-  notes: string;
-  sceneCount: number;
+  topic: string;
+  sceneCount: SceneCount;
+  style: ContentStyle;
+  audience: AudienceType;
+  customAudience: string;
   voice: VoiceType;
-  style: StyleType;
+  aspectRatio: '9:16';
+  requirements: string;
   videoModel: VideoModelType;
 }
 
-export interface ScriptScene {
-  videoPrompt: string;
-  voiceScript: string;
+export interface CharacterProfile {
+  name: string;
+  description: string;
+  fixedIdentity: string;
 }
 
-export interface ThumbnailVariation {
-  text: string;
-  gradient?: string;
-  styleClass?: string;
+export interface ScriptScene {
+  title: string;
+  background: string;
+  action: string;
+  expression: string;
+  camera: string;
+  videoPrompt: string;
+  voiceScript: string;
 }
 
 export interface GeneratedResult {
   id: string;
   timestamp: number;
-  hook: string;
-  hashtags: string[];
+  summary: string;
+  character: CharacterProfile;
   scenes: ScriptScene[];
-  thumbnailVariations: ThumbnailVariation[];
   inputs: AppState;
 }
 
-export const STORAGE_KEY = "brand_video_scripts_v1";
+export const STORAGE_KEY = 'video_3d_scripts_v2';

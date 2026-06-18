@@ -1,197 +1,101 @@
-import React, { useEffect, useRef, useState } from 'react';
-import localforage from 'localforage';
+import React, { useEffect, useState } from 'react';
 import { toast, Toaster } from 'sonner';
-import { Check, Copy, Download, ImagePlus, Loader2, Minus, Play, Plus, RefreshCw, Sparkles, Trash2, Wand2, X } from 'lucide-react';
-import { AppState, GeneratedResult, StyleType, VideoModelType, VoiceType } from './types';
-import { compressImage } from './lib/image';
-import { generateContent, suggestScripts } from './services/ai';
+import {
+  Bot,
+  Check,
+  Copy,
+  Film,
+  Loader2,
+  Play,
+  RefreshCw,
+  Sparkles,
+  Users,
+  Volume2,
+  Wand2,
+} from 'lucide-react';
+import {
+  AppState,
+  AudienceType,
+  ContentStyle,
+  GeneratedResult,
+  SceneCount,
+  VideoModelType,
+  VoiceType,
+} from './types';
+import { generateContent } from './services/ai';
 import { getHistory, saveResult } from './services/storage';
 
+const STYLE_OPTIONS: ContentStyle[] = [
+  'Vui vẻ',
+  'Giáo dục',
+  'Truyền cảm hứng',
+  'Hài hước',
+  'Gần gũi',
+  'Kể chuyện',
+  'Chuyên nghiệp',
+  'Dễ hiểu',
+];
+
+const AUDIENCE_OPTIONS: AudienceType[] = [
+  'Trẻ em',
+  'Người trưởng thành',
+  'Gia đình',
+  'Người quan tâm sức khỏe',
+  'Tùy chỉnh',
+];
+
 const INITIAL_STATE: AppState = {
-  images: [],
-  selectedImageIndex: null,
-  content: '',
-  notes: '',
+  topic: '',
   sceneCount: 3,
+  style: 'Giáo dục',
+  audience: 'Gia đình',
+  customAudience: '',
   voice: 'Bắc',
-  style: 'professional',
+  aspectRatio: '9:16',
+  requirements: '',
   videoModel: 'Veo 3',
 };
-
-const IMAGE_LIBRARY_KEY = 'clipbrand_image_library';
-const LOCKED_FEATURE_MESSAGE = 'Chức năng được mở khi tham gia buổi Miễn Phí chuyên sâu';
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
 }
 
-function Button({ children, className = '', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button className={cx('inline-flex items-center justify-center gap-2 rounded-xl font-bold transition active:scale-[0.98] disabled:opacity-60 disabled:pointer-events-none', className)} {...props}>{children}</button>;
+function Button({
+  children,
+  className = '',
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      className={cx(
+        'inline-flex items-center justify-center gap-2 rounded-xl font-bold transition active:scale-[0.98] disabled:opacity-60 disabled:pointer-events-none',
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </button>
+  );
 }
 
-function ThumbnailItem({ thumb, refImage, idx }: { thumb: any; refImage: string | undefined; idx: number }) {
-  const [downloading, setDownloading] = useState(false);
-
-  const styles = [
-    { name: 'square', box: 'left-5 right-5 bottom-[13%] rounded-[18px] bg-gradient-to-br from-[#FFB020] to-[#F97316] shadow-[0_14px_35px_rgba(249,115,22,0.45)] border border-white/25', text: 'text-white' },
-    { name: 'dark-pill', box: 'left-6 right-6 bottom-[14%] rounded-full bg-black/82 shadow-[0_14px_35px_rgba(0,0,0,0.45)] border border-white/15 backdrop-blur-sm', text: 'text-white' },
-    { name: 'glass', box: 'left-7 right-7 bottom-[15%] rounded-[22px] bg-white/28 shadow-[0_14px_35px_rgba(15,23,42,0.35)] border border-white/55 backdrop-blur-md', text: 'text-white drop-shadow-[0_2px_5px_rgba(0,0,0,0.65)]' },
-    { name: 'ribbon', box: 'left-4 right-4 bottom-[14%] rounded-tl-[28px] rounded-br-[28px] rounded-tr-[10px] rounded-bl-[10px] bg-gradient-to-r from-[#0EA5E9] to-[#0369A1] shadow-[0_14px_35px_rgba(14,165,233,0.45)] border border-white/25', text: 'text-white' },
-  ];
-
-  const style = styles[idx % styles.length];
-
-  const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
-
-  const drawRoundRect = (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) => {
-    const r = Math.min(radius, width / 2, height / 2);
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + width, y, x + width, y + height, r);
-    ctx.arcTo(x + width, y + height, x, y + height, r);
-    ctx.arcTo(x, y + height, x, y, r);
-    ctx.arcTo(x, y, x + r, y, r);
-    ctx.closePath();
-  };
-
-  const wrapText = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number) => {
-    const words = String(text || '').toUpperCase().split(/\s+/).filter(Boolean);
-    const lines: string[] = [];
-    let line = '';
-    for (const word of words) {
-      const test = line ? `${line} ${word}` : word;
-      if (ctx.measureText(test).width <= maxWidth) line = test;
-      else {
-        if (line) lines.push(line);
-        line = word;
-      }
-      if (lines.length === maxLines) break;
-    }
-    if (line && lines.length < maxLines) lines.push(line);
-    if (lines.length === maxLines) {
-      while (ctx.measureText(lines[maxLines - 1] + '...').width > maxWidth && lines[maxLines - 1].length > 3) {
-        lines[maxLines - 1] = lines[maxLines - 1].slice(0, -1);
-      }
-    }
-    return lines;
-  };
-
-  const handleDownload = async () => {
-    if (!refImage) {
-      toast.error('Chưa có ảnh thumbnail để tải');
-      return;
-    }
-    setDownloading(true);
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = 1080;
-      canvas.height = 1920;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Không tạo được canvas');
-      const img = await loadImage(refImage);
-
-      const canvasRatio = canvas.width / canvas.height;
-      const imgRatio = img.width / img.height;
-      let sx = 0, sy = 0, sw = img.width, sh = img.height;
-      if (imgRatio > canvasRatio) {
-        sw = img.height * canvasRatio;
-        sx = (img.width - sw) / 2;
-      } else {
-        sh = img.width / canvasRatio;
-        sy = (img.height - sh) / 2;
-      }
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-
-      const overlay = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      overlay.addColorStop(0, 'rgba(0,0,0,0.02)');
-      overlay.addColorStop(0.55, 'rgba(0,0,0,0.08)');
-      overlay.addColorStop(1, 'rgba(0,0,0,0.62)');
-      ctx.fillStyle = overlay;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      const variant = idx % 4;
-      let boxX = 100, boxW = 880, radius = 54;
-      if (variant === 1) { boxX = 130; boxW = 820; radius = 999; }
-      if (variant === 2) { boxX = 150; boxW = 780; radius = 62; }
-      if (variant === 3) { boxX = 90; boxW = 900; radius = 40; }
-
-      let fontSize = 78;
-      let lines: string[] = [];
-      do {
-        ctx.font = `900 ${fontSize}px Arial, sans-serif`;
-        lines = wrapText(ctx, String(thumb.text || ''), boxW - 130, 3);
-        fontSize -= 4;
-      } while (fontSize > 48 && lines.some((line) => ctx.measureText(line).width > boxW - 130));
-      fontSize += 4;
-      ctx.font = `900 ${fontSize}px Arial, sans-serif`;
-      const lineHeight = fontSize * 1.12;
-      const boxH = Math.max(230, lines.length * lineHeight + 100);
-      const boxY = canvas.height - boxH - 230;
-
-      ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.35)';
-      ctx.shadowBlur = 36;
-      ctx.shadowOffsetY = 18;
-      drawRoundRect(ctx, boxX, boxY, boxW, boxH, radius);
-      if (variant === 0) {
-        const grad = ctx.createLinearGradient(boxX, boxY, boxX + boxW, boxY + boxH);
-        grad.addColorStop(0, '#FFB020'); grad.addColorStop(1, '#F97316'); ctx.fillStyle = grad;
-      } else if (variant === 1) ctx.fillStyle = 'rgba(0,0,0,0.84)';
-      else if (variant === 2) ctx.fillStyle = 'rgba(255,255,255,0.30)';
-      else {
-        const grad = ctx.createLinearGradient(boxX, boxY, boxX + boxW, boxY);
-        grad.addColorStop(0, '#0EA5E9'); grad.addColorStop(1, '#0369A1'); ctx.fillStyle = grad;
-      }
-      ctx.fill();
-      ctx.restore();
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = variant === 2 ? 'rgba(255,255,255,0.72)' : 'rgba(255,255,255,0.22)';
-      drawRoundRect(ctx, boxX, boxY, boxW, boxH, radius);
-      ctx.stroke();
-
-      ctx.fillStyle = '#FFFFFF';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.shadowColor = 'rgba(0,0,0,0.55)';
-      ctx.shadowBlur = variant === 2 ? 10 : 0;
-      ctx.shadowOffsetY = variant === 2 ? 4 : 0;
-      const startY = boxY + boxH / 2 - ((lines.length - 1) * lineHeight) / 2;
-      lines.forEach((line, i) => ctx.fillText(line, canvas.width / 2, startY + i * lineHeight));
-
-      const link = document.createElement('a');
-      link.download = `clipbrand-thumb-${idx + 1}.webp`;
-      link.href = canvas.toDataURL('image/webp', 0.96);
-      link.click();
-      toast.success('Đã tải ảnh kèm chữ');
-    } catch (error) {
-      console.error(error);
-      toast.error('Lỗi khi tải ảnh thumbnail');
-    } finally {
-      setDownloading(false);
-    }
-  };
-
+function FieldTitle({
+  number,
+  title,
+  description,
+}: {
+  number: number;
+  title: string;
+  description?: string;
+}) {
   return (
-    <div className="flex flex-col gap-3">
-      <div className="relative aspect-[9/16] rounded-xl overflow-hidden bg-zinc-200 shadow-md group">
-        {refImage ? <img src={refImage} className="absolute inset-0 w-full h-full object-cover brightness-[0.85] contrast-110 saturate-110 group-hover:scale-105 transition-transform duration-500" alt="Thumbnail base" /> : <div className="absolute inset-0 bg-gradient-to-br from-zinc-300 to-zinc-500" />}
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/10 to-black/70 pointer-events-none" />
-        <div className="absolute bottom-[13%] left-0 right-0 flex items-center justify-center px-4 w-full z-10 pointer-events-none">
-          <div className={`w-auto max-w-[88%] min-w-[70%] px-5 py-4 ${style.box} transition-all duration-300 group-hover:scale-[1.03]`}>
-            <p className={`text-center uppercase font-black leading-[1.12] tracking-tight break-words ${style.text}`} style={{ fontSize: 'clamp(0.9rem, 5.2cqw, 1.15rem)' }}>{thumb.text}</p>
-          </div>
-        </div>
+    <div className="mb-3">
+      <div className="flex items-center gap-2">
+        <span className="grid h-7 w-7 place-items-center rounded-full bg-brand-blue text-xs font-black text-white">
+          {number}
+        </span>
+        <h2 className="font-bold text-brand-text-title">{title}</h2>
       </div>
-      <Button onClick={handleDownload} disabled={downloading} className="w-full border border-brand-blue text-brand-blue hover:bg-brand-blue hover:text-white rounded-[10px] min-h-[44px] bg-white">
-        {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-        {downloading ? 'Đang xử lý...' : 'Tải ảnh'}
-      </Button>
+      {description && <p className="mt-1 pl-9 text-xs text-brand-text-muted">{description}</p>}
     </div>
   );
 }
@@ -201,140 +105,460 @@ export default function App() {
   const [history, setHistory] = useState<GeneratedResult[]>([]);
   const [currentResult, setCurrentResult] = useState<GeneratedResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [copiedKey, setCopiedKey] = useState('');
 
   useEffect(() => {
-    (async () => {
-      const saved = await localforage.getItem<string[]>(IMAGE_LIBRARY_KEY);
-      if (Array.isArray(saved) && saved.length > 0) setState((s) => ({ ...s, images: saved, selectedImageIndex: 0 }));
+    void (async () => {
       const hist = await getHistory();
       setHistory(hist);
       if (hist[0]) setCurrentResult(hist[0]);
     })();
   }, []);
 
-  const saveImages = async (images: string[]) => localforage.setItem(IMAGE_LIBRARY_KEY, images.slice(0, 6));
-
-  const copyToClipboard = async (text: string, title: string) => {
-    await navigator.clipboard.writeText(text);
-    toast.success(`Đã copy ${title}`);
-  };
-
-  const handleContentChange = async (value: string) => {
-    setState((s) => ({ ...s, content: value }));
-    if (value.trim().split(/\s+/).length >= 4) setSuggestions(await suggestScripts(value));
-    else setSuggestions([]);
-  };
-
-  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const copyToClipboard = async (text: string, key: string) => {
     try {
-      const img = await compressImage(file);
-      setState((s) => {
-        const images = [img, ...s.images].slice(0, 6);
-        saveImages(images);
-        return { ...s, images, selectedImageIndex: 0 };
-      });
-      toast.success('Đã thêm ảnh vào thư viện');
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      toast.success('Đã sao chép');
+      window.setTimeout(() => setCopiedKey(''), 1500);
     } catch {
-      toast.error('Lỗi khi tải ảnh lên');
+      toast.error('Không thể sao chép. Vui lòng thử lại.');
     }
   };
 
   const handleGenerate = async () => {
-    if (!state.content.trim()) return toast.error('Vui lòng nhập nội dung kịch bản');
+    if (!state.topic.trim()) {
+      toast.error('Vui lòng nhập chủ đề video');
+      return;
+    }
+    if (state.audience === 'Tùy chỉnh' && !state.customAudience.trim()) {
+      toast.error('Vui lòng nhập đối tượng xem tùy chỉnh');
+      return;
+    }
+
     setLoading(true);
     try {
-      const result = await generateContent(state);
+      const result = await generateContent({ ...state, topic: state.topic.trim() });
       await saveResult(result);
       const hist = await getHistory();
       setHistory(hist);
       setCurrentResult(result);
-      toast.success('Tạo kịch bản thành công');
+      toast.success('Đã tạo kịch bản hoạt hình 3D');
     } catch (error: any) {
-      toast.error(error?.message || 'Lỗi tạo kịch bản');
+      console.error(error);
+      toast.error(error?.message || 'Không thể tạo kịch bản. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
   };
 
-  const refImage = currentResult?.inputs.images[currentResult.inputs.selectedImageIndex ?? 0];
+  const resetApp = () => {
+    setState(INITIAL_STATE);
+    setCurrentResult(null);
+    setCopiedKey('');
+  };
 
   return (
     <div className="min-h-screen bg-brand-bg-sub text-brand-text-body pb-20">
       <Toaster position="top-center" richColors />
       <header className="sticky top-0 z-50 bg-gradient-to-br from-brand-blue to-brand-blue-dark shadow-md">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2"><div className="w-10 h-10 rounded-xl bg-brand-yellow-light flex items-center justify-center"><Sparkles className="w-5 h-5 text-brand-text-title" /></div><h1 className="font-bold text-lg text-white">Tạo Kịch Bản Video</h1></div>
-          <Button onClick={() => { setState({ ...INITIAL_STATE, images: state.images, selectedImageIndex: state.selectedImageIndex }); setCurrentResult(null); }} className="bg-white/15 hover:bg-white/30 text-white text-xs px-3 py-2 border border-white/30"><RefreshCw className="w-4 h-4" />Tạo mới</Button>
+        <div className="mx-auto flex min-h-16 max-w-7xl items-center justify-between gap-3 px-4 py-2">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-yellow-light">
+              <Bot className="h-6 w-6 text-brand-text-title" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-black text-white sm:text-lg">
+                Tạo Video Hoạt Hình 3D
+              </h1>
+              <p className="hidden text-xs text-white/75 sm:block">
+                Chủ đề bất kỳ → nhân vật 3D → câu chuyện liền mạch
+              </p>
+            </div>
+          </div>
+          <Button
+            onClick={resetApp}
+            className="shrink-0 border border-white/30 bg-white/15 px-3 py-2 text-xs text-white hover:bg-white/25"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Tạo mới
+          </Button>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
-        <section className="lg:col-span-5 space-y-6">
+      <main className="mx-auto grid max-w-7xl grid-cols-1 gap-7 px-4 py-6 lg:grid-cols-12">
+        <section className="space-y-5 lg:col-span-5">
           <div className="card">
-            <div className="flex justify-between mb-3"><h2 className="font-bold text-brand-text-title">1. Ảnh tham chiếu</h2><span className="text-xs text-brand-text-muted">{state.images.length}/6 ảnh</span></div>
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              <label className="flex flex-col items-center justify-center w-24 h-32 rounded-xl border-2 border-dashed border-brand-border hover:border-brand-blue cursor-pointer shrink-0 bg-brand-bg-sub">
-                <ImagePlus className="w-6 h-6 text-brand-blue mb-2" /><span className="text-xs">Thêm ảnh</span>
-                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleUpload} />
-              </label>
-              {state.images.map((img, i) => <div key={i} className={cx('relative w-24 h-32 rounded-xl overflow-hidden shrink-0 cursor-pointer', state.selectedImageIndex === i && 'ring-2 ring-brand-blue ring-offset-2')} onClick={() => setState((s) => ({ ...s, selectedImageIndex: i }))}>
-                <img src={img} className="w-full h-full object-cover" />
-                {state.selectedImageIndex === i && <div className="absolute inset-0 bg-brand-blue/20 grid place-items-center"><span className="bg-brand-yellow rounded-full p-1"><Check className="w-4 h-4" /></span></div>}
-                <button className="absolute top-1 right-1 bg-black/60 hover:bg-red-500 text-white rounded-full p-1" onClick={(e) => { e.stopPropagation(); setState((s) => { const images = s.images.filter((_, idx) => idx !== i); saveImages(images); return { ...s, images, selectedImageIndex: images.length ? 0 : null }; }); }}><X className="w-3 h-3" /></button>
-              </div>)}
+            <FieldTitle
+              number={1}
+              title="Chủ đề video"
+              description="AI tự xác định nhân vật hoạt hình 3D phù hợp nhất."
+            />
+            <textarea
+              className="input min-h-[140px]"
+              placeholder="Ví dụ: Tác dụng của củ tỏi, lợi ích của quả chanh, hành trình của giọt nước..."
+              value={state.topic}
+              onChange={(event) =>
+                setState((old) => ({ ...old, topic: event.target.value.slice(0, 2000) }))
+              }
+            />
+            <div className="mt-2 text-right text-xs text-brand-text-muted">
+              {state.topic.length}/2000 ký tự
             </div>
           </div>
 
           <div className="card">
-            <div className="flex justify-between mb-3"><h2 className="font-bold text-brand-text-title">2. Nội dung / Tiêu đề</h2><span className="text-xs text-brand-text-muted">{state.content.trim().split(/\s+/).filter(Boolean).length}/2000 từ</span></div>
-            <textarea className="input min-h-[160px]" placeholder="Nhập ý tưởng, tiêu đề hoặc nội dung dài mà bạn muốn truyền tải..." value={state.content} onChange={(e) => handleContentChange(e.target.value)} />
-            {suggestions.length > 0 && <div className="mt-3 space-y-2">{suggestions.map((s, i) => <button key={i} className="w-full text-left px-3 py-3 rounded-lg bg-brand-bg-sub border border-brand-border text-sm" onClick={() => { setState((old) => ({ ...old, content: s })); setSuggestions([]); }}>{s}</button>)}</div>}
+            <FieldTitle number={2} title="Số cảnh" description="Mỗi cảnh dài khoảng 8 giây." />
+            <div className="grid grid-cols-3 gap-2">
+              {([3, 4, 5] as SceneCount[]).map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  onClick={() => setState((old) => ({ ...old, sceneCount: count }))}
+                  className={cx(
+                    'rounded-xl border px-3 py-3 font-black',
+                    state.sceneCount === count
+                      ? 'border-brand-blue bg-brand-blue text-white'
+                      : 'border-brand-border bg-white hover:border-brand-blue',
+                  )}
+                >
+                  {count} cảnh
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="card">
-            <h2 className="font-bold text-brand-text-title mb-3">3. Điều khiển AI</h2>
-            <textarea className="input min-h-[70px]" placeholder="Ví dụ: Năng lượng cao, chuyên gia, gần gũi..." value={state.notes} onChange={(e) => setState((s) => ({ ...s, notes: e.target.value }))} />
+            <FieldTitle number={3} title="Phong cách nội dung" />
+            <div className="grid grid-cols-2 gap-2">
+              {STYLE_OPTIONS.map((style) => (
+                <button
+                  key={style}
+                  type="button"
+                  onClick={() => setState((old) => ({ ...old, style }))}
+                  className={cx(
+                    'min-h-12 rounded-xl border px-3 py-2 text-left text-sm font-bold',
+                    state.style === style
+                      ? 'border-brand-blue bg-brand-blue text-white'
+                      : 'border-brand-border bg-white hover:border-brand-blue',
+                  )}
+                >
+                  {style}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="card"><h3 className="font-bold mb-2">Cảnh quay</h3><div className="flex items-center bg-brand-bg-sub rounded-xl border border-brand-border"><button className="p-3" onClick={() => setState((s) => ({ ...s, sceneCount: Math.max(1, s.sceneCount - 1) }))}><Minus /></button><span className="flex-1 text-center font-bold">{state.sceneCount}</span><button className="p-3" onClick={() => { if (state.sceneCount >= 3) return toast.info(LOCKED_FEATURE_MESSAGE); setState((s) => ({ ...s, sceneCount: s.sceneCount + 1 })); }}><Plus /></button></div></div>
-            <div className="card"><h3 className="font-bold mb-2">Giọng đọc</h3><select className="input h-12" value={state.voice} onChange={(e) => setState((s) => ({ ...s, voice: e.target.value as VoiceType }))}><option>Bắc</option><option>Trung</option><option>Nam</option></select></div>
+          <div className="card">
+            <FieldTitle number={4} title="Đối tượng xem" />
+            <div className="mb-3 flex items-center gap-2 text-brand-text-muted">
+              <Users className="h-4 w-4" />
+              <span className="text-xs">Nội dung và cách diễn đạt sẽ được điều chỉnh theo người xem.</span>
+            </div>
+            <select
+              className="input h-12"
+              value={state.audience}
+              onChange={(event) =>
+                setState((old) => ({
+                  ...old,
+                  audience: event.target.value as AudienceType,
+                }))
+              }
+            >
+              {AUDIENCE_OPTIONS.map((audience) => (
+                <option key={audience}>{audience}</option>
+              ))}
+            </select>
+            {state.audience === 'Tùy chỉnh' && (
+              <input
+                className="input mt-3 h-12"
+                placeholder="Nhập đối tượng xem mong muốn..."
+                value={state.customAudience}
+                onChange={(event) =>
+                  setState((old) => ({ ...old, customAudience: event.target.value }))
+                }
+              />
+            )}
           </div>
 
-          <div className="card space-y-3">
-            <h3 className="font-bold">Phong cách</h3>
-            <div className="grid grid-cols-2 gap-2">{(['energy','professional','gentle','natural'] as StyleType[]).map((v) => <button key={v} className={cx('p-3 rounded-xl border font-bold text-left', state.style === v ? 'bg-brand-blue text-white border-brand-blue' : 'bg-white border-brand-border')} onClick={() => { if (v === 'gentle') return toast.info(LOCKED_FEATURE_MESSAGE); setState((s) => ({ ...s, style: v })); }}>{v === 'energy' ? '🚀 Năng lượng' : v === 'professional' ? '💼 Chuyên nghiệp' : v === 'gentle' ? '🔒 Nhẹ nhàng' : '🏡 Tự nhiên'}</button>)}</div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="card">
+              <div className="mb-2 flex items-center gap-2">
+                <Volume2 className="h-4 w-4 text-brand-blue" />
+                <h3 className="font-bold text-brand-text-title">Giọng đọc</h3>
+              </div>
+              <select
+                className="input h-12"
+                value={state.voice}
+                onChange={(event) =>
+                  setState((old) => ({ ...old, voice: event.target.value as VoiceType }))
+                }
+              >
+                <option>Bắc</option>
+                <option>Trung</option>
+                <option>Nam</option>
+              </select>
+            </div>
+
+            <div className="card">
+              <div className="mb-2 flex items-center gap-2">
+                <Film className="h-4 w-4 text-brand-blue" />
+                <h3 className="font-bold text-brand-text-title">Tỉ lệ video</h3>
+              </div>
+              <select className="input h-12" value={state.aspectRatio} disabled>
+                <option>9:16</option>
+              </select>
+            </div>
           </div>
 
-          <div className="card space-y-3"><h3 className="font-bold">Model Video</h3><div className="grid grid-cols-2 gap-2">{(['Veo 3','Gork'] as VideoModelType[]).map((v) => <button key={v} className={cx('p-3 rounded-xl border font-bold', state.videoModel === v ? 'bg-brand-blue text-white border-brand-blue' : 'bg-white border-brand-border')} onClick={() => setState((s) => ({ ...s, videoModel: v }))}>{v}<span className="block text-xs font-medium">Video {v === 'Veo 3' ? 8 : 10} giây</span></button>)}</div></div>
+          <div className="card">
+            <FieldTitle
+              number={5}
+              title="Yêu cầu bổ sung"
+              description="Tùy chỉnh bối cảnh, màu sắc, cảm xúc hoặc thông điệp."
+            />
+            <textarea
+              className="input min-h-[100px]"
+              placeholder="Ví dụ: Bối cảnh khu vườn, màu sắc tươi sáng, cảm xúc vui vẻ..."
+              value={state.requirements}
+              onChange={(event) =>
+                setState((old) => ({ ...old, requirements: event.target.value }))
+              }
+            />
+          </div>
 
-          <Button onClick={handleGenerate} disabled={loading} className="w-full h-14 bg-brand-yellow hover:bg-brand-yellow-light text-brand-text-title shadow-lg text-base"><Wand2 className="w-5 h-5" />{loading ? 'Đang tạo kịch bản...' : 'Tạo Kịch Bản Video'}</Button>
+          <div className="card">
+            <h3 className="mb-3 font-bold text-brand-text-title">Model video gốc</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {(['Veo 3', 'Gork'] as VideoModelType[]).map((model) => (
+                <button
+                  key={model}
+                  type="button"
+                  onClick={() => setState((old) => ({ ...old, videoModel: model }))}
+                  className={cx(
+                    'rounded-xl border p-3 font-bold',
+                    state.videoModel === model
+                      ? 'border-brand-blue bg-brand-blue text-white'
+                      : 'border-brand-border bg-white',
+                  )}
+                >
+                  {model}
+                  <span className="block text-xs font-medium">
+                    Video {model === 'Veo 3' ? 8 : 10} giây
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <Button
+            onClick={handleGenerate}
+            disabled={loading}
+            className="h-14 w-full bg-brand-yellow text-base text-brand-text-title shadow-lg hover:bg-brand-yellow-light"
+          >
+            {loading ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <Wand2 className="h-5 w-5" />
+            )}
+            {loading ? 'AI đang xây dựng câu chuyện...' : 'Tạo kịch bản hoạt hình 3D'}
+          </Button>
         </section>
 
-        <section className="lg:col-span-7 space-y-6">
-          {!currentResult ? <div className="h-[400px] rounded-2xl border border-dashed border-brand-border bg-white grid place-items-center text-center p-6"><div><Play className="w-12 h-12 mx-auto text-brand-placeholder mb-4" /><p className="text-brand-text-muted font-medium">Nhập thông tin và bấm Tạo kịch bản video để xem kết quả.</p></div></div> : <>
-            <div className="card"><div className="flex items-start justify-between gap-4"><div><h3 className="font-bold text-brand-text-title text-lg">{currentResult.hook}</h3><div className="mt-2 flex flex-wrap gap-2">{currentResult.hashtags.map((tag) => <span key={tag} className="text-xs font-bold bg-brand-yellow-light text-[#92400E] px-2 py-1 rounded-full">{tag}</span>)}</div></div><Button className="border border-brand-blue text-brand-blue p-3" onClick={() => copyToClipboard(`${currentResult.hook}\n\n${currentResult.hashtags.join(' ')}`, 'Hook & Hashtags')}><Copy className="w-4 h-4" /></Button></div></div>
-
-            <div className="space-y-4"><h3 className="font-bold text-lg flex items-center gap-2 text-brand-text-title"><Play className="w-5 h-5 text-brand-blue" />Kịch bản chi tiết ({currentResult.scenes.length} cảnh)</h3>{currentResult.scenes.map((scene, idx) => <div key={idx} className="rounded-2xl border border-brand-border bg-white shadow-sm overflow-hidden">
-              <div className="flex flex-col sm:flex-row">
-                <div className="bg-brand-bg-sub text-brand-text-body p-4 sm:w-[34%] flex flex-col relative shrink-0 border-r border-brand-border/50 max-h-[240px] sm:max-h-[250px] overflow-hidden">
-                  <div className="flex items-center justify-between mb-3 shrink-0"><span className="bg-white text-brand-blue border border-brand-blue font-mono text-[11px] font-bold rounded-full px-2 py-1">SCENE {idx + 1}</span><span className="bg-brand-yellow-light text-[#92400E] text-[11px] font-bold rounded-full px-2 py-1">{currentResult.inputs.videoModel}</span></div>
-                  <p className="text-[12px] leading-relaxed font-mono opacity-90 max-h-[145px] overflow-y-auto pr-2 mb-11">{scene.videoPrompt}</p>
-                  <Button className="absolute bottom-2 right-2 hover:bg-brand-yellow-light text-brand-blue min-h-[40px] px-3" onClick={() => copyToClipboard(scene.videoPrompt, `Prompt Cảnh ${idx + 1}`)}><Copy className="w-4 h-4" />Prompt</Button>
+        <section className="space-y-5 lg:col-span-7">
+          {!currentResult ? (
+            <div className="grid min-h-[440px] place-items-center rounded-2xl border border-dashed border-brand-border bg-white p-7 text-center">
+              <div className="max-w-md">
+                <div className="mx-auto mb-5 grid h-20 w-20 place-items-center rounded-3xl bg-brand-blue-light">
+                  <Sparkles className="h-10 w-10 text-brand-blue-dark" />
                 </div>
-                <div className="bg-white p-5 flex-1 relative flex flex-col justify-center min-h-[140px]"><p className="text-brand-text-body text-[14px] leading-relaxed pl-4 border-l-[3px] border-brand-yellow font-medium">"{scene.voiceScript}"</p><Button className="absolute right-3 top-3 h-10 w-10 text-brand-blue bg-brand-bg-sub hover:bg-brand-yellow-light rounded-xl" onClick={() => copyToClipboard(scene.voiceScript, `Thoại Cảnh ${idx + 1}`)}><Copy className="w-4 h-4" /></Button></div>
+                <h2 className="mb-2 text-xl font-black text-brand-text-title">
+                  Câu chuyện 3D bắt đầu từ một chủ đề
+                </h2>
+                <p className="text-sm leading-6 text-brand-text-muted">
+                  AI sẽ tạo nhân vật trung tâm, nhận diện cố định, prompt video và lời thoại
+                  liền mạch cho từng cảnh.
+                </p>
               </div>
-              <div className="bg-brand-bg-main border-t border-brand-border p-3 sm:px-5 flex justify-end"><Button className="w-full sm:w-auto bg-brand-yellow hover:bg-brand-yellow-light text-brand-text-title rounded-xl min-h-[44px] px-4" onClick={() => copyToClipboard(`Prompt Video:\n${scene.videoPrompt}\n\nLời thoại:\n${scene.voiceScript}`, 'Prompt + Lời thoại')}><Copy className="w-4 h-4" />Copy Prompt + Lời thoại</Button></div>
-            </div>)}</div>
+            </div>
+          ) : (
+            <>
+              <div className="card overflow-hidden">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div>
+                    <div className="mb-1 text-xs font-black uppercase tracking-wider text-brand-blue">
+                      Nhân vật trung tâm
+                    </div>
+                    <h2 className="text-xl font-black text-brand-text-title">
+                      {currentResult.character.name}
+                    </h2>
+                  </div>
+                  <div className="rounded-full bg-brand-yellow-light px-3 py-1 text-xs font-bold text-[#92400E]">
+                    {currentResult.inputs.sceneCount} cảnh · {currentResult.inputs.aspectRatio}
+                  </div>
+                </div>
+                <p className="mb-4 text-sm leading-6">{currentResult.character.description}</p>
+                <div className="rounded-xl border border-brand-border bg-brand-bg-sub p-4">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="text-xs font-black uppercase text-brand-text-title">
+                      Nhận diện cố định
+                    </span>
+                    <Button
+                      onClick={() =>
+                        copyToClipboard(currentResult.character.fixedIdentity, 'character')
+                      }
+                      className="h-9 border border-brand-blue bg-white px-3 text-xs text-brand-blue"
+                    >
+                      {copiedKey === 'character' ? (
+                        <Check className="h-4 w-4" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
+                      Sao chép
+                    </Button>
+                  </div>
+                  <p className="text-xs leading-5 text-brand-text-muted">
+                    {currentResult.character.fixedIdentity}
+                  </p>
+                </div>
+                <div className="mt-4 rounded-xl bg-brand-yellow-light/60 p-3 text-sm font-medium">
+                  {currentResult.summary}
+                </div>
+              </div>
 
-            <div className="space-y-4 pt-4 border-t border-brand-border"><h3 className="font-bold text-lg flex items-center gap-2 text-brand-text-title"><ImagePlus className="w-5 h-5 text-brand-yellow" />Gợi ý Thumbnail</h3><div className="grid grid-cols-1 sm:grid-cols-3 gap-4">{currentResult.thumbnailVariations.map((thumb, idx) => <ThumbnailItem key={idx} thumb={thumb} refImage={refImage} idx={idx} />)}</div></div>
-          </>}
+              <div className="flex items-center gap-2">
+                <Play className="h-5 w-5 text-brand-blue" />
+                <h2 className="text-lg font-black text-brand-text-title">
+                  Kịch bản chi tiết ({currentResult.scenes.length} cảnh)
+                </h2>
+              </div>
 
-          {history.length > 0 && <div className="card"><h3 className="font-bold mb-3">Lịch sử gần đây</h3><div className="space-y-2">{history.slice(0, 3).map((item) => <button key={item.id} className="w-full text-left p-3 rounded-xl border border-brand-border hover:border-brand-blue" onClick={() => setCurrentResult(item)}><span className="font-bold line-clamp-1">{item.hook}</span><span className="block text-xs text-brand-text-muted">{new Date(item.timestamp).toLocaleString('vi-VN')} · {item.scenes.length} cảnh</span></button>)}</div></div>}
+              {currentResult.scenes.map((scene, index) => {
+                const promptKey = 'prompt-' + index;
+                const voiceKey = 'voice-' + index;
+                return (
+                  <article
+                    key={index}
+                    className="overflow-hidden rounded-2xl border border-brand-border bg-white shadow-sm"
+                  >
+                    <div className="flex items-center justify-between gap-3 bg-gradient-to-r from-brand-blue to-brand-blue-dark px-4 py-3 text-white">
+                      <div>
+                        <span className="text-[11px] font-bold uppercase text-white/70">
+                          Cảnh {index + 1}
+                        </span>
+                        <h3 className="font-black">{scene.title}</h3>
+                      </div>
+                      <span className="rounded-full bg-white/15 px-3 py-1 text-xs font-bold">
+                        ~8 giây
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 border-b border-brand-border bg-brand-bg-sub p-4 text-xs sm:grid-cols-4">
+                      <div>
+                        <div className="font-black text-brand-text-title">Bối cảnh</div>
+                        <div className="mt-1 text-brand-text-muted">{scene.background}</div>
+                      </div>
+                      <div>
+                        <div className="font-black text-brand-text-title">Hành động</div>
+                        <div className="mt-1 text-brand-text-muted">{scene.action}</div>
+                      </div>
+                      <div>
+                        <div className="font-black text-brand-text-title">Biểu cảm</div>
+                        <div className="mt-1 text-brand-text-muted">{scene.expression}</div>
+                      </div>
+                      <div>
+                        <div className="font-black text-brand-text-title">Góc máy</div>
+                        <div className="mt-1 text-brand-text-muted">{scene.camera}</div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 p-4">
+                      <div className="rounded-xl border border-brand-border bg-[#08111f] p-4 text-white">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <span className="text-xs font-black uppercase text-brand-blue-light">
+                            Prompt video 3D
+                          </span>
+                          <Button
+                            onClick={() => copyToClipboard(scene.videoPrompt, promptKey)}
+                            className="h-9 bg-white/10 px-3 text-xs text-white hover:bg-white/20"
+                          >
+                            {copiedKey === promptKey ? (
+                              <Check className="h-4 w-4" />
+                            ) : (
+                              <Copy className="h-4 w-4" />
+                            )}
+                            Sao chép
+                          </Button>
+                        </div>
+                        <p className="max-h-48 overflow-y-auto pr-1 font-mono text-xs leading-5 text-white/85">
+                          {scene.videoPrompt}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl border-l-4 border-brand-yellow bg-brand-yellow-light/45 p-4">
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <span className="text-xs font-black uppercase text-brand-text-title">
+                            Lời thoại tiếng Việt
+                          </span>
+                          <Button
+                            onClick={() => copyToClipboard(scene.voiceScript, voiceKey)}
+                            className="h-9 border border-brand-blue bg-white px-3 text-xs text-brand-blue"
+                          >
+                            {copiedKey === voiceKey ? (
+                              <Check className="h-4 w-4" />
+                            ) : (
+                              <Copy className="h-4 w-4" />
+                            )}
+                            Sao chép
+                          </Button>
+                        </div>
+                        <p className="text-sm font-semibold leading-6">“{scene.voiceScript}”</p>
+                      </div>
+
+                      <Button
+                        onClick={() =>
+                          copyToClipboard(
+                            'Prompt video:\n' +
+                              scene.videoPrompt +
+                              '\n\nLời thoại:\n' +
+                              scene.voiceScript,
+                            'all-' + index,
+                          )
+                        }
+                        className="min-h-11 w-full bg-brand-yellow px-4 text-brand-text-title hover:bg-brand-yellow-light"
+                      >
+                        <Copy className="h-4 w-4" />
+                        Sao chép prompt + lời thoại
+                      </Button>
+                    </div>
+                  </article>
+                );
+              })}
+            </>
+          )}
+
+          {history.length > 0 && (
+            <div className="card">
+              <h3 className="mb-3 font-black text-brand-text-title">Kịch bản gần đây</h3>
+              <div className="space-y-2">
+                {history.slice(0, 5).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setCurrentResult(item)}
+                    className="w-full rounded-xl border border-brand-border p-3 text-left hover:border-brand-blue"
+                  >
+                    <span className="line-clamp-1 block font-bold">
+                      {item.inputs.topic || item.summary}
+                    </span>
+                    <span className="mt-1 block text-xs text-brand-text-muted">
+                      {new Date(item.timestamp).toLocaleString('vi-VN')} · {item.scenes.length} cảnh
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       </main>
     </div>
