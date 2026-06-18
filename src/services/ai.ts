@@ -1,28 +1,18 @@
 import { GoogleGenAI } from '@google/genai';
-import { AppState, GeneratedResult, StyleType } from '../types';
+import { AppState, GeneratedResult, ScriptScene } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 const E = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {};
 
-const IDENTITY_LOCK =
-  'Based on the reference image. Same person, same identity, same face, same hairstyle, same outfit, same background, same environment. Maintain 100% character consistency and scene consistency. No morphing, no identity change, no outfit change, no background change.';
-
 const VOICE_DIRECTION: Record<string, string> = {
-  Bắc: 'The person is speaking Vietnamese with a clear, standard Northern Vietnamese accent (giọng Bắc Hà Nội). Speech is articulate and natural. Natural lip movements perfectly synchronized with the speech rhythm.',
-  Nam: 'The person is speaking Vietnamese with a clear, standard Southern Vietnamese accent (giọng Nam). Speech is fluid and natural. Natural lip movements perfectly synchronized with the speech rhythm.',
-  Trung: 'The person is speaking Vietnamese with a clear, intelligible Central Vietnamese accent (giọng Trung phổ thông). Speech is authentic and natural. Natural lip movements perfectly synchronized with the speech rhythm.',
-};
-
-const STYLE_DIRECTION: Record<StyleType, string> = {
-  energy: 'The overall tone is high-energy, enthusiastic, vibrant, persuasive, and dynamic.',
-  professional: 'The overall tone is professional, confident, authoritative, clear, calm, and trustworthy.',
-  gentle: 'The overall tone is soft, warm, emotional, soothing, intimate, and reflective.',
-  natural: 'The overall tone is casual, friendly, approachable, relaxed, and conversational.',
+  Bắc: 'The character speaks natural Vietnamese with a clear standard Northern Vietnamese accent. Precise Vietnamese lip sync.',
+  Trung: 'The character speaks natural Vietnamese with a clear intelligible Central Vietnamese accent. Precise Vietnamese lip sync.',
+  Nam: 'The character speaks natural Vietnamese with a clear standard Southern Vietnamese accent. Precise Vietnamese lip sync.',
 };
 
 const VIDEO_TECHNIQUE: Record<string, string> = {
-  'Veo 3': 'Static camera, locked shot, no zoom, no pan unless specified. Natural lip sync with speech, subtle facial micro-expressions, natural eye blinking every 3-4 seconds, gentle realistic head movements. Cinematic shallow depth of field. No text overlay, no watermark. Photorealistic rendering.',
-  Gork: 'Static camera, locked shot, no zoom, no pan unless specified. Natural lip sync, realistic mouth movements matching speech rhythm, subtle head tilts, natural eye blinking, relaxed authentic facial expressions, gentle hand gestures when emphasizing points. No text overlay, no watermark. Photorealistic rendering.',
+  'Veo 3': 'Smooth cinematic 3D animation, stable motion, natural micro-expressions, accurate Vietnamese lip sync, high detail, high quality rendering.',
+  Gork: 'Smooth expressive 3D animation, stable character motion, natural facial expressions, accurate Vietnamese lip sync, high detail, high quality rendering.',
 };
 
 type ApiKeyItem = { key: string; active?: boolean };
@@ -50,7 +40,7 @@ function readLocalProviderKeys(provider: 'google' | 'deepseek' | 'openai'): stri
     return uniqueKeys(
       keys
         .filter((item: ApiKeyItem) => item && item.active !== false)
-        .map((item: ApiKeyItem) => item.key)
+        .map((item: ApiKeyItem) => item.key),
     );
   } catch {
     return [];
@@ -64,8 +54,7 @@ const GEMINI_KEYS = uniqueKeys([
   E.VITE_GEMINI_API_KEY_3,
   E.VITE_GEMINI_API_KEY_4,
   E.VITE_GEMINI_API_KEY_5,
-  // Compatibility with old Vite define in vite.config.ts
-  // @ts-ignore
+  // @ts-ignore compatibility with the original Vite define
   typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY : undefined,
   ...readLocalProviderKeys('google'),
 ]).filter((key) => key.startsWith('AIza'));
@@ -84,36 +73,33 @@ const OPENAI_KEYS = uniqueKeys([
   ...readLocalProviderKeys('openai'),
 ]);
 
-const errText = (err: any) => `${err?.status ?? ''} ${err?.code ?? ''} ${err?.message ?? ''}`.toLowerCase();
+const errText = (err: any) =>
+  String(err?.status ?? '') + ' ' + String(err?.code ?? '') + ' ' + String(err?.message ?? '');
+
 const shouldTryNextKey = (err: any) => {
-  const text = errText(err);
-  return err?.status === 429 || err?.status === 400 || err?.status === 401 || err?.status === 403 || text.includes('quota') || text.includes('rate') || text.includes('invalid') || text.includes('api key') || text.includes('billing') || text.includes('permission');
+  const text = errText(err).toLowerCase();
+  return (
+    err?.status === 429 ||
+    err?.status === 400 ||
+    err?.status === 401 ||
+    err?.status === 403 ||
+    text.includes('quota') ||
+    text.includes('rate') ||
+    text.includes('invalid') ||
+    text.includes('api key') ||
+    text.includes('billing') ||
+    text.includes('permission')
+  );
 };
 
-function wordCount(text: string): number {
-  return text.trim().split(/\s+/).filter(Boolean).length;
-}
-
-function trimWords(text: string, maxWords: number): string {
-  const words = String(text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
-  if (words.length <= maxWords) return words.join(' ');
-  let out = words.slice(0, maxWords).join(' ');
-  out = out.replace(/[,.!?;:…]+$/g, '');
-  return `${out}.`;
-}
-
-function getVoiceWordLimit(videoModel: string) {
-  // Fix: Veo 3 chỉ 8 giây, lời thoại phải ngắn. Chặn cứng tối đa 28 từ/cảnh.
-  if (videoModel === 'Veo 3') return { minWords: 18, maxWords: 28, seconds: 8 };
-  return { minWords: 24, maxWords: 36, seconds: 10 };
-}
-
-function buildVoiceStylePrompt(voice: string, style: StyleType): string {
-  return `${VOICE_DIRECTION[voice] || VOICE_DIRECTION.Bắc} ${STYLE_DIRECTION[style] || STYLE_DIRECTION.professional}`;
-}
-
 function extractJSON(text: string): any {
-  const cleaned = String(text || '').trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+  const cleaned = String(text || '')
+    .trim()
+    .replace(/^\`\`\`json\s*/i, '')
+    .replace(/^\`\`\`\s*/i, '')
+    .replace(/\`\`\`$/i, '')
+    .trim();
+
   try {
     return JSON.parse(cleaned);
   } catch {
@@ -122,6 +108,16 @@ function extractJSON(text: string): any {
     if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
     throw new Error('AI không trả về JSON hợp lệ.');
   }
+}
+
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function trimWords(text: string, maxWords: number): string {
+  const words = String(text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  if (words.length <= maxWords) return words.join(' ');
+  return words.slice(0, maxWords).join(' ').replace(/[,.!?;:…]+$/g, '') + '.';
 }
 
 async function callBackendProxyText(model: string, prompt: string): Promise<string> {
@@ -133,7 +129,7 @@ async function callBackendProxyText(model: string, prompt: string): Promise<stri
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.ok === false) {
-    const err: any = new Error(data?.error || `Proxy HTTP ${res.status}`);
+    const err: any = new Error(data?.error || 'Proxy HTTP ' + res.status);
     err.status = res.status;
     throw err;
   }
@@ -156,7 +152,7 @@ async function callGeminiText(model: string, prompt: string): Promise<string> {
     } catch (err: any) {
       lastErr = err;
       if (shouldTryNextKey(err)) {
-        console.warn(`[AI] Gemini key #${index + 1} lỗi/hết quota, thử key tiếp.`);
+        console.warn('[AI] Gemini key #' + (index + 1) + ' lỗi/hết quota, thử key tiếp.');
         continue;
       }
       throw err;
@@ -165,10 +161,15 @@ async function callGeminiText(model: string, prompt: string): Promise<string> {
   throw lastErr || new Error('Chưa cấu hình Gemini API Key.');
 }
 
-async function callOpenAICompat(endpoint: string, apiKey: string, model: string, prompt: string): Promise<string> {
+async function callOpenAICompat(
+  endpoint: string,
+  apiKey: string,
+  model: string,
+  prompt: string,
+): Promise<string> {
   const res = await fetch(endpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
     body: JSON.stringify({
       model,
       messages: [{ role: 'user', content: prompt }],
@@ -178,7 +179,7 @@ async function callOpenAICompat(endpoint: string, apiKey: string, model: string,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    const err: any = new Error(body?.error?.message || `HTTP ${res.status}`);
+    const err: any = new Error(body?.error?.message || 'HTTP ' + res.status);
     err.status = res.status;
     throw err;
   }
@@ -186,7 +187,13 @@ async function callOpenAICompat(endpoint: string, apiKey: string, model: string,
   return data.choices?.[0]?.message?.content || '';
 }
 
-async function callProviderKeys(provider: 'DeepSeek' | 'OpenAI', keys: string[], endpoint: string, model: string, prompt: string): Promise<string> {
+async function callProviderKeys(
+  provider: 'DeepSeek' | 'OpenAI',
+  keys: string[],
+  endpoint: string,
+  model: string,
+  prompt: string,
+): Promise<string> {
   let lastErr: any;
   for (const [index, key] of keys.entries()) {
     try {
@@ -194,13 +201,13 @@ async function callProviderKeys(provider: 'DeepSeek' | 'OpenAI', keys: string[],
     } catch (err: any) {
       lastErr = err;
       if (shouldTryNextKey(err)) {
-        console.warn(`[AI] ${provider} key #${index + 1} lỗi/hết quota, thử key tiếp.`);
+        console.warn('[AI] ' + provider + ' key #' + (index + 1) + ' lỗi/hết quota, thử key tiếp.');
         continue;
       }
       throw err;
     }
   }
-  throw lastErr || new Error(`Chưa cấu hình ${provider} API Key.`);
+  throw lastErr || new Error('Chưa cấu hình ' + provider + ' API Key.');
 }
 
 async function callAIText(model: string, prompt: string): Promise<string> {
@@ -209,133 +216,184 @@ async function callAIText(model: string, prompt: string): Promise<string> {
     try {
       return await callBackendProxyText(model, prompt);
     } catch (err) {
-      const hasFallbackKeys = GEMINI_KEYS.length > 0 || DEEPSEEK_KEYS.length > 0 || OPENAI_KEYS.length > 0;
+      const hasFallbackKeys =
+        GEMINI_KEYS.length > 0 || DEEPSEEK_KEYS.length > 0 || OPENAI_KEYS.length > 0;
       if (!hasFallbackKeys) throw err;
       console.warn('[AI] Proxy lỗi hoặc chưa có /api/generate, chuyển sang key browser.', err);
     }
   }
+
   if (GEMINI_KEYS.length > 0) return callGeminiText(model, prompt);
   if (DEEPSEEK_KEYS.length > 0) {
-    return callProviderKeys('DeepSeek', DEEPSEEK_KEYS, 'https://api.deepseek.com/chat/completions', E.VITE_DEEPSEEK_MODEL || 'deepseek-chat', prompt);
+    return callProviderKeys(
+      'DeepSeek',
+      DEEPSEEK_KEYS,
+      'https://api.deepseek.com/chat/completions',
+      E.VITE_DEEPSEEK_MODEL || 'deepseek-chat',
+      prompt,
+    );
   }
   if (OPENAI_KEYS.length > 0) {
-    return callProviderKeys('OpenAI', OPENAI_KEYS, 'https://api.openai.com/v1/chat/completions', E.VITE_OPENAI_MODEL || 'gpt-4o-mini', prompt);
+    return callProviderKeys(
+      'OpenAI',
+      OPENAI_KEYS,
+      'https://api.openai.com/v1/chat/completions',
+      E.VITE_OPENAI_MODEL || 'gpt-4o-mini',
+      prompt,
+    );
   }
   throw new Error('Chưa cấu hình API Key. Hãy thêm VITE_GEMINI_API_KEY hoặc bật backend /api/generate.');
 }
 
-export async function suggestScripts(contentSnippet: string): Promise<string[]> {
-  const text = contentSnippet.trim();
-  if (wordCount(text) < 4) return [];
-  const prompt = `Dựa trên nội dung sau, đề xuất 2 tiêu đề viral ngắn gọn cho video TikTok/Reels. Mỗi tiêu đề tối đa 18 từ, tiếng Việt, kích thích tò mò, không nhắc tên công cụ AI. Nội dung: "${text}". Trả về JSON: {"suggestions":["...","..."]}`;
-  try {
-    const raw = await callAIText('gemini-2.5-flash', prompt);
-    const data = extractJSON(raw);
-    const arr = Array.isArray(data?.suggestions) ? data.suggestions : [];
-    return arr.map(String).slice(0, 3);
-  } catch (err) {
-    console.warn('[suggestScripts]', err);
-    return [];
-  }
-}
-
-function normalizeScenes(dataScenes: any[], sceneCount: number, fallbackContent: string) {
-  const scenes = Array.isArray(dataScenes) ? dataScenes.slice(0, sceneCount) : [];
-  while (scenes.length < sceneCount) {
-    scenes.push({
-      videoPrompt: `Medium close-up shot, direct eye contact, natural expression, clean soft lighting. Scene ${scenes.length + 1}.`,
-      voiceScript: fallbackContent || 'Các mẹ nhớ để ý điều nhỏ này mỗi ngày nhé.',
-    });
-  }
-  return scenes;
+function buildFallbackScene(index: number, topic: string): ScriptScene {
+  return {
+    title: 'Cảnh ' + (index + 1),
+    background: 'Không gian hoạt hình 3D sinh động, màu sắc hài hòa.',
+    action: 'Nhân vật chính tương tác tự nhiên với bối cảnh.',
+    expression: 'Thân thiện, biểu cảm rõ ràng.',
+    camera: 'Medium shot, chuyển động máy nhẹ và ổn định.',
+    videoPrompt:
+      'A consistent cute 3D animated character explains ' +
+      topic +
+      '. Vertical 9:16, high quality, accurate Vietnamese lip sync, no on-screen text, no subtitles, no logo, no watermark.',
+    voiceScript:
+      index === 0
+        ? trimWords('Mọi người ơi, hôm nay chúng ta cùng khám phá ' + topic + ' theo cách thật dễ hiểu nhé.', 25)
+        : trimWords('Hãy theo dõi tiếp để hiểu rõ câu chuyện thú vị này nhé.', 25),
+  };
 }
 
 export async function generateContent(state: AppState): Promise<GeneratedResult> {
-  const hasRefImage = state.selectedImageIndex !== null && state.images[state.selectedImageIndex] !== undefined;
-  const { minWords, maxWords, seconds } = getVoiceWordLimit(state.videoModel);
-  const voiceDir = buildVoiceStylePrompt(state.voice, state.style || 'professional');
-  const technique = VIDEO_TECHNIQUE[state.videoModel] || VIDEO_TECHNIQUE['Veo 3'];
-  const promptPrefix = hasRefImage ? `${IDENTITY_LOCK} ${voiceDir}` : voiceDir;
+  const audience =
+    state.audience === 'Tùy chỉnh' && state.customAudience.trim()
+      ? state.customAudience.trim()
+      : state.audience;
+  const voiceDirection = VOICE_DIRECTION[state.voice] || VOICE_DIRECTION.Bắc;
+  const videoTechnique = VIDEO_TECHNIQUE[state.videoModel] || VIDEO_TECHNIQUE['Veo 3'];
 
-  const prompt = `Bạn là chuyên gia viết kịch bản video ngắn cho TikTok/Reels/Shorts.
-
-NHIỆM VỤ: Tạo kịch bản gồm ${state.sceneCount} cảnh. Mỗi cảnh dùng cho video ${seconds} giây.
-
-DỮ LIỆU:
-- Nội dung chính: "${state.content}"
-- Điều khiển thêm: "${state.notes || 'Không có'}"
-- Giọng vùng miền: ${state.voice}
-- Phong cách: ${state.style}
-- Model video: ${state.videoModel}, thời lượng mỗi cảnh ${seconds} giây
-- Có ảnh tham chiếu: ${hasRefImage ? 'CÓ' : 'KHÔNG'}
-
-QUY TẮC CỰC KỲ QUAN TRỌNG CHO LỜI THOẠI:
-- voiceScript phải là tiếng Việt tự nhiên như người thật nói.
-- Mỗi voiceScript BẮT BUỘC từ ${minWords} đến ${maxWords} từ. Tuyệt đối KHÔNG vượt quá ${maxWords} từ.
-- Riêng Veo 3 chỉ 8 giây, nên mỗi cảnh tối đa ${maxWords} từ. Câu ngắn, nói được trong 8 giây.
-- Cảnh 1 phải có hook mạnh.
-- Cảnh cuối có kết luận hoặc CTA nhẹ, nhưng vẫn không vượt ${maxWords} từ.
-- Không nhắc tên công cụ AI, phần mềm, nền tảng tạo video.
-- Không đưa hashtag vào voiceScript.
-
-QUY TẮC VIDEO PROMPT bằng tiếng Anh:
-- Mỗi videoPrompt phải bắt đầu bằng: "${promptPrefix}"
-- Sau đó mô tả hành động, biểu cảm, góc máy, ánh sáng cụ thể cho cảnh đó.
-- Kỹ thuật bắt buộc: ${technique}
-- Không text overlay, không watermark.
-
-THUMBNAIL:
-- Tạo 3 tiêu đề thumbnail tiếng Việt, tối đa 45 ký tự/tiêu đề, gây tò mò, liên quan nội dung.
-
-OUTPUT CHỈ JSON, không markdown, không giải thích:
-{
-  "hook": "hook tiếng Việt tối đa 15 từ",
-  "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#tag5"],
-  "scenes": [
-    {
-      "videoPrompt": "${promptPrefix} ...",
-      "voiceScript": "${minWords}-${maxWords} từ, không vượt ${maxWords} từ"
-    }
-  ],
-  "thumbnailTexts": ["Tiêu đề 1", "Tiêu đề 2", "Tiêu đề 3"]
-}`;
+  const prompt = [
+    'Bạn là biên kịch hoạt hình 3D và chuyên gia viết prompt video AI.',
+    '',
+    'NHIỆM VỤ:',
+    '- Phân tích chính xác chủ đề: "' + state.topic + '".',
+    '- Tự xác định một nhân vật hoạt hình 3D trung tâm phù hợp nhất với chủ đề.',
+    '- Nếu chủ đề là một vật, cây, quả, bộ phận hoặc hiện tượng, hãy nhân cách hóa thành nhân vật 3D đáng yêu có mắt, miệng, tay chân và biểu cảm tự nhiên.',
+    '- Tạo câu chuyện liền mạch gồm đúng ' + state.sceneCount + ' cảnh, mỗi cảnh khoảng 8 giây.',
+    '',
+    'THÔNG SỐ:',
+    '- Phong cách nội dung: ' + state.style,
+    '- Đối tượng xem: ' + audience,
+    '- Giọng đọc: ' + state.voice,
+    '- Tỉ lệ video: ' + state.aspectRatio,
+    '- Model video đang dùng: ' + state.videoModel,
+    '- Yêu cầu bổ sung: ' + (state.requirements.trim() || 'Không có'),
+    '',
+    'NHÂN VẬT NHẤT QUÁN:',
+    '- Tạo name, description và fixedIdentity thật cụ thể.',
+    '- fixedIdentity phải mô tả cố định hình dáng, màu sắc, khuôn mặt, mắt, miệng, tay chân, trang phục, chất liệu và phong cách 3D.',
+    '- Tuyệt đối không đổi ngoại hình, màu sắc, trang phục, giọng nói hoặc phong cách hình ảnh giữa các cảnh.',
+    '',
+    'QUY TẮC PROMPT VIDEO:',
+    '- videoPrompt viết bằng tiếng Anh, đầy đủ và dùng trực tiếp để tạo video.',
+    '- Mỗi prompt phải lặp lại fixedIdentity của nhân vật.',
+    '- Nêu rõ bối cảnh, hành động, biểu cảm, góc máy, ánh sáng và diễn biến của cảnh.',
+    '- ' + voiceDirection,
+    '- ' + videoTechnique,
+    '- Vertical 9:16, high quality, vivid realistic 3D animation.',
+    '- No on-screen text, no subtitles, no logo, no watermark.',
+    '- No character redesign, no color change, no outfit change, no voice change.',
+    '',
+    'QUY TẮC LỜI THOẠI:',
+    '- Mỗi cảnh chỉ một đoạn tiếng Việt tự nhiên khoảng 18-25 từ, nói vừa trong 8 giây.',
+    '- Các đoạn nối tiếp thành một câu chuyện hoàn chỉnh, không lặp ý.',
+    '- Dùng từ dễ hiểu, đúng chủ đề và đúng đối tượng.',
+    '- Với chủ đề sức khỏe, không bịa đặt công dụng, không chẩn đoán hoặc hứa hẹn điều trị.',
+    '- Cấm dùng: chữa khỏi, trị dứt điểm, cam kết hiệu quả, đảm bảo 100%, thuốc thần kỳ.',
+    '- Cảnh cuối phải kết luận hoặc có lời kêu gọi hành động phù hợp.',
+    '',
+    'OUTPUT CHỈ JSON HỢP LỆ, KHÔNG MARKDOWN:',
+    '{',
+    '  "summary": "Tóm tắt câu chuyện",',
+    '  "character": {',
+    '    "name": "Tên nhân vật",',
+    '    "description": "Mô tả nhân vật bằng tiếng Việt",',
+    '    "fixedIdentity": "Mô tả nhận diện cố định bằng tiếng Anh"',
+    '  },',
+    '  "scenes": [',
+    '    {',
+    '      "title": "Tiêu đề cảnh",',
+    '      "background": "Bối cảnh",',
+    '      "action": "Hành động",',
+    '      "expression": "Biểu cảm",',
+    '      "camera": "Góc máy và ánh sáng",',
+    '      "videoPrompt": "Prompt video 3D chi tiết bằng tiếng Anh",',
+    '      "voiceScript": "Lời thoại tiếng Việt 18-25 từ"',
+    '    }',
+    '  ]',
+    '}',
+  ].join('\n');
 
   const raw = await callAIText('gemini-2.5-flash', prompt);
   const data = extractJSON(raw);
-  const scenes = normalizeScenes(data?.scenes, state.sceneCount, state.content).map((scene: any, index: number) => {
-    let videoPrompt = String(scene?.videoPrompt || '').trim();
-    if (!videoPrompt.includes(VOICE_DIRECTION[state.voice] || VOICE_DIRECTION.Bắc)) {
-      videoPrompt = `${voiceDir} ${videoPrompt}`;
-    }
-    if (hasRefImage && !videoPrompt.startsWith('Based on the reference image')) {
-      videoPrompt = `${IDENTITY_LOCK} ${videoPrompt}`;
-    }
-    if (!videoPrompt.includes('No text overlay')) videoPrompt += ' No text overlay, no watermark.';
 
-    let voiceScript = String(scene?.voiceScript || '').replace(/\s+/g, ' ').trim();
-    voiceScript = trimWords(voiceScript, maxWords);
+  const character = {
+    name: String(data?.character?.name || 'Nhân vật 3D chính').trim(),
+    description: String(
+      data?.character?.description ||
+        'Nhân vật hoạt hình 3D thân thiện, sinh động và phù hợp với chủ đề.',
+    ).trim(),
+    fixedIdentity: String(
+      data?.character?.fixedIdentity ||
+        'A cute consistent 3D animated character with a friendly face, expressive eyes, small arms and legs, and a polished colorful surface.',
+    ).trim(),
+  };
 
-    // Nếu AI trả về quá ngắn hoặc rỗng, tạo câu fallback ngắn đúng giới hạn.
-    if (wordCount(voiceScript) < 6) {
-      voiceScript = index === 0
-        ? trimWords(`Các mẹ ơi, có một điều nhỏ nhưng ảnh hưởng rất nhiều: ${state.content}`, maxWords)
-        : trimWords(`Mình chỉ cần làm đều mỗi ngày, thay đổi nhỏ thôi nhưng kết quả sẽ tốt hơn nhiều.`, maxWords);
+  const rawScenes = Array.isArray(data?.scenes) ? data.scenes.slice(0, state.sceneCount) : [];
+  while (rawScenes.length < state.sceneCount) {
+    rawScenes.push(buildFallbackScene(rawScenes.length, state.topic));
+  }
+
+  const scenes: ScriptScene[] = rawScenes.map((scene: any, index: number) => {
+    const fallback = buildFallbackScene(index, state.topic);
+    const continuity =
+      'CHARACTER CONTINUITY LOCK: ' +
+      character.fixedIdentity +
+      '. Same exact character identity, proportions, colors, face, clothing, material, voice, and 3D art style in every scene. ';
+    let videoPrompt = String(scene?.videoPrompt || fallback.videoPrompt).trim();
+
+    if (!videoPrompt.toLowerCase().includes('character continuity lock')) {
+      videoPrompt = continuity + videoPrompt;
+    }
+    if (!videoPrompt.toLowerCase().includes('vertical 9:16')) {
+      videoPrompt += ' Vertical 9:16, high quality.';
+    }
+    if (!videoPrompt.toLowerCase().includes('no on-screen text')) {
+      videoPrompt += ' No on-screen text, no subtitles, no logo, no watermark.';
+    }
+    if (!videoPrompt.toLowerCase().includes('lip sync')) {
+      videoPrompt += ' ' + voiceDirection;
     }
 
-    return { videoPrompt, voiceScript };
+    let voiceScript = trimWords(String(scene?.voiceScript || fallback.voiceScript), 25);
+    if (wordCount(voiceScript) < 8) voiceScript = fallback.voiceScript;
+
+    return {
+      title: String(scene?.title || fallback.title).trim(),
+      background: String(scene?.background || fallback.background).trim(),
+      action: String(scene?.action || fallback.action).trim(),
+      expression: String(scene?.expression || fallback.expression).trim(),
+      camera: String(scene?.camera || fallback.camera).trim(),
+      videoPrompt,
+      voiceScript,
+    };
   });
-
-  const thumbnailTexts = Array.isArray(data?.thumbnailTexts) ? data.thumbnailTexts : [];
 
   return {
     id: uuidv4(),
     timestamp: Date.now(),
-    hook: trimWords(String(data?.hook || state.content || 'Điều nhỏ này nhiều mẹ đang bỏ qua!'), 15),
-    hashtags: Array.isArray(data?.hashtags) ? data.hashtags.slice(0, 5).map(String) : ['#mevabe', '#chamsoccon', '#dinhduong', '#suckhoe', '#videoAI'],
+    summary: String(data?.summary || 'Câu chuyện hoạt hình 3D về ' + state.topic).trim(),
+    character,
     scenes,
-    thumbnailVariations: [0, 1, 2].map((i) => ({
-      text: String(thumbnailTexts[i] || ['Điều mẹ dễ bỏ qua', 'Bí quyết chăm con khỏe', 'Làm đều mỗi ngày'][i]).slice(0, 60),
-    })),
     inputs: state,
   };
 }
