@@ -453,30 +453,41 @@ export default function App() {
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 border-b border-brand-border bg-brand-bg-sub p-4 text-xs sm:grid-cols-4">
-                      <div>
-                        <div className="font-black text-brand-text-title">Bối cảnh</div>
-                        <div className="mt-1 text-brand-text-muted">{scene.background}</div>
+                    <details className="group border-b border-brand-border bg-brand-bg-sub">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-xs font-black text-brand-text-title [&::-webkit-details-marker]:hidden">
+                        <span>Chi tiết cảnh: Bối cảnh · Hành động · Biểu cảm · Góc máy</span>
+                        <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] text-brand-blue group-open:hidden">
+                          Xem
+                        </span>
+                        <span className="hidden shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] text-brand-blue group-open:inline">
+                          Thu gọn
+                        </span>
+                      </summary>
+                      <div className="grid grid-cols-2 gap-3 border-t border-brand-border/70 px-4 py-3 text-xs sm:grid-cols-4">
+                        <div>
+                          <div className="font-black text-brand-text-title">Bối cảnh</div>
+                          <div className="mt-1 text-brand-text-muted">{scene.background}</div>
+                        </div>
+                        <div>
+                          <div className="font-black text-brand-text-title">Hành động</div>
+                          <div className="mt-1 text-brand-text-muted">{scene.action}</div>
+                        </div>
+                        <div>
+                          <div className="font-black text-brand-text-title">Biểu cảm</div>
+                          <div className="mt-1 text-brand-text-muted">{scene.expression}</div>
+                        </div>
+                        <div>
+                          <div className="font-black text-brand-text-title">Góc máy</div>
+                          <div className="mt-1 text-brand-text-muted">{scene.camera}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="font-black text-brand-text-title">Hành động</div>
-                        <div className="mt-1 text-brand-text-muted">{scene.action}</div>
-                      </div>
-                      <div>
-                        <div className="font-black text-brand-text-title">Biểu cảm</div>
-                        <div className="mt-1 text-brand-text-muted">{scene.expression}</div>
-                      </div>
-                      <div>
-                        <div className="font-black text-brand-text-title">Góc máy</div>
-                        <div className="mt-1 text-brand-text-muted">{scene.camera}</div>
-                      </div>
-                    </div>
+                    </details>
 
                     <div className="space-y-4 p-4">
-                      <div className="rounded-xl border border-brand-border bg-[#08111f] p-4 text-white">
-                        <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="rounded-xl border border-brand-border bg-[#08111f] p-3 text-white">
+                        <div className="flex items-center justify-between gap-3">
                           <span className="text-xs font-black uppercase text-brand-blue-light">
-                            Prompt video 3D
+                            Prompt video 3D tiếng Anh
                           </span>
                           <Button
                             onClick={() => copyToClipboard(scene.videoPrompt, promptKey)}
@@ -490,9 +501,16 @@ export default function App() {
                             Sao chép
                           </Button>
                         </div>
-                        <p className="max-h-48 overflow-y-auto pr-1 font-mono text-xs leading-5 text-white/85">
-                          {scene.videoPrompt}
-                        </p>
+                        <details className="group mt-2">
+                          <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg bg-white/10 px-3 py-2 text-xs font-bold text-white/80 hover:bg-white/15 [&::-webkit-details-marker]:hidden">
+                            <span>Xem nội dung prompt</span>
+                            <span className="group-open:hidden">Mở rộng</span>
+                            <span className="hidden group-open:inline">Thu gọn</span>
+                          </summary>
+                          <p className="mt-3 max-h-48 overflow-y-auto px-1 pr-2 font-mono text-xs leading-5 text-white/85">
+                            {scene.videoPrompt}
+                          </p>
+                        </details>
                       </div>
 
                       <div className="rounded-xl border-l-4 border-brand-yellow bg-brand-yellow-light/45 p-4">
