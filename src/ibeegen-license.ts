@@ -1,6 +1,8 @@
-const DEFAULT_LICENSE_SERVER = "https://key1-five.vercel.app";
-const TRIAL_START_KEY = "ibeegen_trial_started_at_v1";
-const TRIAL_DURATION_MS = 5 * 24 * 60 * 60 * 1000;
+const DEFAULT_LICENSE_SERVER = "https://kichhoat.vinatool.online";
+const APP_ID = "veoday3d";
+const TRIAL_START_KEY = `ibeegen_trial_started_at_${APP_ID}`;
+const TRIAL_DURATION_MS = 3 * 24 * 60 * 60 * 1000;
+const DEVICE_KEY_STORAGE_KEY = `ibeegen_device_key_${APP_ID}`;
 
 const LICENSE_SERVER = String(
   import.meta.env.VITE_LICENSE_SERVER_URL || DEFAULT_LICENSE_SERVER,
@@ -12,11 +14,11 @@ export function makeDeviceKey(): string {
 }
 
 export function getDeviceKey(): string {
-  const existingKey = localStorage.getItem("ibeegen_device_key");
+  const existingKey = localStorage.getItem(DEVICE_KEY_STORAGE_KEY);
   if (existingKey) return existingKey;
 
   const newKey = makeDeviceKey();
-  localStorage.setItem("ibeegen_device_key", newKey);
+  localStorage.setItem(DEVICE_KEY_STORAGE_KEY, newKey);
   return newKey;
 }
 
@@ -66,7 +68,13 @@ export async function checkLicense(): Promise<LicenseInfo> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     cache: "no-store",
-    body: JSON.stringify({ device_key }),
+    body: JSON.stringify({
+      app_id: APP_ID,
+      device_key,
+      platform: navigator.platform || "unknown",
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown",
+      user_agent: navigator.userAgent || "unknown",
+    }),
   });
 
   const data = await response.json().catch(() => ({}));
