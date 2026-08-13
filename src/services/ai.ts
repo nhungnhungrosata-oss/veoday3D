@@ -2,7 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { AppState, GeneratedResult, ScriptScene } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
-const E = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {};
+const E: ImportMetaEnv = import.meta.env;
 
 const VOICE_DIRECTION: Record<string, string> = {
   Bắc: 'The character speaks natural Vietnamese with a clear standard Northern Vietnamese accent. Precise Vietnamese lip sync.',
